@@ -522,6 +522,7 @@ function renderPasta(){
     return `<div class="ev-row" style="${repOk?'opacity:.75':''}">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div style="flex:1;min-width:200px">
+          ${ev.estabelecimento?`<div style="font-size:11px;color:var(--muted);margin-bottom:2px">${ev.estabelecimento}</div>`:''}
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <div style="font-size:14px;font-weight:600">${ev.nome}</div>
             ${repOk
@@ -529,7 +530,7 @@ function renderPasta(){
               : `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(245,166,35,.1);color:var(--amber);font-weight:500">⏳ Pendente</span>`
             }
           </div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">${ev.arquivo||''}</div>
+          <div style="font-size:11px;color:var(--muted2);margin-top:2px">${ev.arquivo||''}</div>
           ${cli.nome||cli.doc?`<div style="margin-top:8px;padding:8px 10px;background:var(--bg3);border-radius:var(--r);font-size:12px">
             ${cli.nome?`<div><span style="color:var(--muted)">Cliente:</span> ${cli.nome}</div>`:''}
             ${cli.doc?`<div><span style="color:var(--muted)">CPF/CNPJ:</span> ${cli.doc}</div>`:''}
@@ -676,15 +677,28 @@ function lerArquivo(input){
         if(!m)return 0;
         return parseFloat(m[0].replace(/\./g,'').replace(',','.'));
       };
-      let totalRepasse=0;
+      let totalRepasse=0, estabelecimento='', cardapio='';
       rows.forEach(row=>{
         const cols=row.split('|').map(c=>c.trim());
         if(/^DÉBITO/i.test(cols[0])&&!debito) debito=parseVal(row);
         if(/^CRÉDITO/i.test(cols[0])&&!credito) credito=parseVal(row);
         if(/^PIX/i.test(cols[0])&&!pix) pix=parseVal(row);
         if(/TOTAL REPASSE/i.test(row)&&!totalRepasse) totalRepasse=parseVal(row);
-        if(/cardápio:/i.test(row)){const m=row.match(/[Cc]ard[áa]pio:\s*([^|]+)/);if(m)nome=m[1].trim()}
+        if(/cardápio:/i.test(row)){const m=row.match(/[Cc]ard[áa]pio:\s*([^|]+)/);if(m)cardapio=m[1].trim()}
+        if(/organizado por:/i.test(row)){
+          // linha anterior ao "organizado por" é o estabelecimento
+        }
       });
+      // Extrai estabelecimento: linha antes de "Organizado por"
+      for(let i=1;i<rows.length;i++){
+        if(/organizado por:/i.test(rows[i])){
+          const prev=rows[i-1].split('|').map(c=>c.trim()).filter(Boolean);
+          if(prev.length===1&&prev[0].length>2) estabelecimento=prev[0];
+          break;
+        }
+      }
+      // nome do evento = cardápio; se não, tenta detectar
+      nome = cardapio || estabelecimento;
       if(!nome){
         for(let i=0;i<rows.length;i++){
           const cols=rows[i].split('|').map(c=>c.trim()).filter(Boolean);
@@ -695,7 +709,7 @@ function lerArquivo(input){
         }
       }
       if(!nome) nome=file.name.replace(/\.xlsx?/i,'').replace(/_/g,' ');
-      S.importData={nome,debito,credito,pix,totalRepasse,arquivo:file.name};
+      S.importData={nome:cardapio||nome, estabelecimento, cardapio, debito,credito,pix,totalRepasse,arquivo:file.name};
       S.maqTemp=[];
       mostrarFormImport();
     }catch(err){toast('Erro ao ler: '+err.message,'err')}
@@ -707,11 +721,12 @@ function mostrarFormImport(){
   const d=S.importData;
   document.getElementById('import-preview').innerHTML=`
     <div style="background:var(--bg3);border-radius:var(--r);padding:.875rem 1rem;margin-bottom:.75rem">
-      <div class="prev-row"><span class="prev-label">Evento</span><span class="prev-val">${d.nome}</span></div>
+      ${d.estabelecimento?`<div class="prev-row"><span class="prev-label">Estabelecimento</span><span class="prev-val">${d.estabelecimento}</span></div>`:''}
+      <div class="prev-row"><span class="prev-label">Cardápio / Evento</span><span class="prev-val" style="color:var(--accent)">${d.nome}</span></div>
       <div class="prev-row"><span class="prev-label">Débito bruto</span><span class="prev-val">${brl(d.debito)}</span></div>
       <div class="prev-row"><span class="prev-label">Crédito bruto</span><span class="prev-val">${brl(d.credito)}</span></div>
       <div class="prev-row"><span class="prev-label">PIX bruto</span><span class="prev-val">${brl(d.pix)}</span></div>
-      <div class="prev-row"><span class="prev-label">Total bruto</span><span class="prev-val" style="color:var(--accent)">${brl(d.debito+d.credito+d.pix)}</span></div>
+      <div class="prev-row"><span class="prev-label">Total bruto</span><span class="prev-val">${brl(d.debito+d.credito+d.pix)}</span></div>
       ${d.totalRepasse>0?`<div class="prev-row"><span class="prev-label">Total repasse (relatório)</span><span class="prev-val" style="color:var(--blue)">${brl(d.totalRepasse)}</span></div>`:''}
     </div>`;
   // preenche taxas padrão da config
@@ -789,7 +804,7 @@ function editarEvento(id){
   if(!ev) return;
   S.editandoEvento=ev;
   // Preenche importData com os dados do evento existente
-  S.importData={nome:ev.nome, debito:ev.debito, credito:ev.credito, pix:ev.pix, totalRepasse:ev.totalRepasse||0, arquivo:ev.arquivo||''};
+  S.importData={nome:ev.nome, estabelecimento:ev.estabelecimento||'', debito:ev.debito, credito:ev.credito, pix:ev.pix, totalRepasse:ev.totalRepasse||0, arquivo:ev.arquivo||''};
   S.maqTemp=(ev.maquinas||[]).map(m=>({...m, id:Date.now()+Math.random()}));
   // Preenche cliente
   if(ev.clienteId){
@@ -818,7 +833,7 @@ function confirmarEvento(){
   const evId=S.editandoEvento?S.editandoEvento.id:'ev_'+Date.now();
   const ev={
     id:evId,
-    nome:d.nome, arquivo:d.arquivo,
+    nome:d.nome, estabelecimento:d.estabelecimento||'', arquivo:d.arquivo,
     debito:d.debito, credito:d.credito, pix:d.pix,
     totalRepasse:d.totalRepasse||0,
     tcDebito:tcD, tcCredito:tcC, tcPix:tcP,
@@ -852,7 +867,7 @@ function gerarPlanilha(){
     [p.nome],
     [`Data: ${fmtDate(p.data)} | Gerado em: ${new Date().toLocaleDateString('pt-BR')}`],
     [],
-    ['Evento','Arquivo','Cliente','CPF/CNPJ','Débito','Crédito','PIX','Total Bruto',
+    ['Evento','Estabelecimento','Arquivo','Cliente','CPF/CNPJ','Débito','Crédito','PIX','Total Bruto',
      'Taxa PagSeg Déb%','Taxa PagSeg Créd%','Taxa PagSeg PIX%',
      'Taxa Cliente Déb%','Taxa Cliente Créd%','Taxa Cliente PIX%',
      'Repasse Bruto','Aluguel','A Repassar (Líq)','Lucro Taxas','Lucro Total (NF)','Markup%','E-mail','Tel','Obs']
@@ -864,7 +879,7 @@ function gerarPlanilha(){
     tot.lucroTaxas+=r.lucroTaxas; tot.aluguel+=r.aluguel; tot.lucro+=r.lucroTotal;
     const cli=ev.cliente||{};
     rows.push([
-      ev.nome, ev.arquivo||'', cli.nome||'', cli.doc||'',
+      ev.nome, ev.estabelecimento||'', ev.arquivo||'', cli.nome||'', cli.doc||'',
       ev.debito, ev.credito, ev.pix, r.totalVendas,
       c.taxaD, c.taxaC, c.taxaP,
       ev.tcDebito, ev.tcCredito, ev.tcPix,
