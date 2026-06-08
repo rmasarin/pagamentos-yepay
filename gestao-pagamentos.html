@@ -383,25 +383,26 @@ function calcEvento(ev){
   const clD = (ev.tcDebito||0)/100, clC = (ev.tcCredito||0)/100, clP = (ev.tcPix||0)/100;
   // Vendas
   const totalVendas = ev.debito + ev.credito + ev.pix;
-  // Valor repassado ao cliente = bruto - taxa cobrada
-  const repasseD = ev.debito * (1 - clD);
-  const repasseC = ev.credito * (1 - clC);
-  const repasseP = ev.pix * (1 - clP);
-  const totalRepasse = repasseD + repasseC + repasseP;
+  // Repasse bruto = TOTAL REPASSE do relatório (já com taxas PagSeguro descontadas)
+  // Se não disponível, calcula pelo bruto - taxas cobradas ao cliente
+  const totalRepasse = ev.totalRepasse > 0
+    ? ev.totalRepasse
+    : ev.debito*(1-clD) + ev.credito*(1-clC) + ev.pix*(1-clP);
   // Custo real (o que pago à PagSeguro)
   const custoD = ev.debito * baseD;
   const custoC = ev.credito * baseC;
   const custoP = ev.pix * baseP;
   const totalCusto = custoD + custoC + custoP;
-  // Lucro taxas = o que cobrei do cliente - o que paguei à PagSeguro
+  // Lucro taxas = valor cobrado do cliente (taxa cli × bruto) - custo PagSeguro
   const lucroTaxas = (ev.debito*clD - custoD) + (ev.credito*clC - custoC) + (ev.pix*clP - custoP);
   // Aluguel
   const aluguel = (ev.maquinas||[]).reduce((a,m)=>a+m.qtd*m.diarias*m.preco,0);
-  // Lucro total = markup taxas + aluguel
+  // Lucro total = lucro taxas + aluguel
   const lucroTotal = lucroTaxas + aluguel;
   const markup = totalVendas>0 ? (lucroTotal/totalVendas)*100 : 0;
+  // A repassar ao cliente = repasse bruto do relatório - aluguel
   const repasseLiquido = totalRepasse - aluguel;
-  return {totalVendas,totalRepasse,repasseLiquido,totalCusto,lucroTaxas,aluguel,lucroTotal,markup,repasseD,repasseC,repasseP,custoD,custoC,custoP,baseD,baseC,baseP,clD,clC,clP};
+  return {totalVendas,totalRepasse,repasseLiquido,totalCusto,lucroTaxas,aluguel,lucroTotal,markup,custoD,custoC,custoP,baseD,baseC,baseP,clD,clC,clP};
 }
 
 function calcPasta(pasta){
@@ -675,11 +676,13 @@ function lerArquivo(input){
         if(!m)return 0;
         return parseFloat(m[0].replace(/\./g,'').replace(',','.'));
       };
+      let totalRepasse=0;
       rows.forEach(row=>{
         const cols=row.split('|').map(c=>c.trim());
         if(/^DÉBITO/i.test(cols[0])&&!debito) debito=parseVal(row);
         if(/^CRÉDITO/i.test(cols[0])&&!credito) credito=parseVal(row);
         if(/^PIX/i.test(cols[0])&&!pix) pix=parseVal(row);
+        if(/TOTAL REPASSE/i.test(row)&&!totalRepasse) totalRepasse=parseVal(row);
         if(/cardápio:/i.test(row)){const m=row.match(/[Cc]ard[áa]pio:\s*([^|]+)/);if(m)nome=m[1].trim()}
       });
       if(!nome){
@@ -692,7 +695,7 @@ function lerArquivo(input){
         }
       }
       if(!nome) nome=file.name.replace(/\.xlsx?/i,'').replace(/_/g,' ');
-      S.importData={nome,debito,credito,pix,arquivo:file.name};
+      S.importData={nome,debito,credito,pix,totalRepasse,arquivo:file.name};
       S.maqTemp=[];
       mostrarFormImport();
     }catch(err){toast('Erro ao ler: '+err.message,'err')}
@@ -709,6 +712,7 @@ function mostrarFormImport(){
       <div class="prev-row"><span class="prev-label">Crédito bruto</span><span class="prev-val">${brl(d.credito)}</span></div>
       <div class="prev-row"><span class="prev-label">PIX bruto</span><span class="prev-val">${brl(d.pix)}</span></div>
       <div class="prev-row"><span class="prev-label">Total bruto</span><span class="prev-val" style="color:var(--accent)">${brl(d.debito+d.credito+d.pix)}</span></div>
+      ${d.totalRepasse>0?`<div class="prev-row"><span class="prev-label">Total repasse (relatório)</span><span class="prev-val" style="color:var(--blue)">${brl(d.totalRepasse)}</span></div>`:''}
     </div>`;
   // preenche taxas padrão da config
   // Taxas padrão do evento: usa valores do evento se editando, senão padrão 2/4/2.2
@@ -764,13 +768,15 @@ function atualizarCalc(){
   const aluguel=S.maqTemp.reduce((a,m)=>a+m.qtd*m.diarias*m.preco,0);
   const lucro=lucroTaxas+aluguel;
   const total=d.debito+d.credito+d.pix;
-  const repasse=d.debito*(1-clD)+d.credito*(1-clC)+d.pix*(1-clP);
+  // Usa totalRepasse do relatório se disponível, senão calcula
+  const repasse=d.totalRepasse>0 ? d.totalRepasse : d.debito*(1-clD)+d.credito*(1-clC)+d.pix*(1-clP);
+  const repasseLiq=repasse-aluguel;
   const el=document.getElementById('calc-preview');
   el.innerHTML=`
     <div class="result-line"><span style="color:var(--muted)">Total bruto</span><span class="mono">${brl(total)}</span></div>
-    <div class="result-line"><span style="color:var(--muted)">Repasse bruto</span><span class="mono">${brl(repasse)}</span></div>
+    <div class="result-line"><span style="color:var(--muted)">Repasse bruto <span style="font-size:10px;color:var(--muted2)">(do relatório)</span></span><span class="mono">${brl(repasse)}</span></div>
     <div class="result-line"><span style="color:var(--muted)">Aluguel máquinas</span><span class="mono" style="color:var(--amber)">- ${brl(aluguel)}</span></div>
-    <div class="result-line"><span style="color:var(--blue)">A repassar ao cliente</span><span class="mono" style="color:var(--blue);font-weight:600">${brl(repasse-aluguel)}</span></div>
+    <div class="result-line"><span style="color:var(--blue)">A repassar ao cliente</span><span class="mono" style="color:var(--blue);font-weight:600">${brl(repasseLiq)}</span></div>
     <div class="result-line"><span style="color:var(--muted)">Lucro nas taxas</span><span class="mono" style="color:var(--accent)">${brl(lucroTaxas)}</span></div>
     <div class="result-line total"><span>Lucro total (NF)</span><span class="mono" style="color:var(--accent)">${brl(lucro)}</span></div>`;
   // total aluguel
@@ -783,7 +789,7 @@ function editarEvento(id){
   if(!ev) return;
   S.editandoEvento=ev;
   // Preenche importData com os dados do evento existente
-  S.importData={nome:ev.nome, debito:ev.debito, credito:ev.credito, pix:ev.pix, arquivo:ev.arquivo||''};
+  S.importData={nome:ev.nome, debito:ev.debito, credito:ev.credito, pix:ev.pix, totalRepasse:ev.totalRepasse||0, arquivo:ev.arquivo||''};
   S.maqTemp=(ev.maquinas||[]).map(m=>({...m, id:Date.now()+Math.random()}));
   // Preenche cliente
   if(ev.clienteId){
@@ -814,6 +820,7 @@ function confirmarEvento(){
     id:evId,
     nome:d.nome, arquivo:d.arquivo,
     debito:d.debito, credito:d.credito, pix:d.pix,
+    totalRepasse:d.totalRepasse||0,
     tcDebito:tcD, tcCredito:tcC, tcPix:tcP,
     maquinas:S.maqTemp.map(m=>({qtd:m.qtd,diarias:m.diarias,preco:m.preco})),
     clienteId:cliId, cliente:cliObj
