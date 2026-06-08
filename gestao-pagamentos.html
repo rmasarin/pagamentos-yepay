@@ -431,7 +431,7 @@ function goPage(id){
   const nav=document.querySelector(`.nav-item[onclick="goPage('${id}')"]`);
   if(nav) nav.classList.add('active');
   if(id==='pastas') renderLista();
-  if(id==='clientes') renderClientes();
+  if(id==='clientes'){document.getElementById('cli-view-lista').style.display='block';document.getElementById('cli-view-detalhe').style.display='none';renderClientes();}
   if(id==='config') loadConfig();
 }
 
@@ -1321,7 +1321,10 @@ function salvarCliente(){
   save();
   if(S.driveConnected) sincronizarDrive();
   fecharModalCliente();
+  // Atualiza tanto a lista quanto o detalhe se estiver aberto
   renderClientes();
+  const det=document.getElementById('cli-view-detalhe');
+  if(det.style.display!=='none'&&editandoClienteId) verCliente(editandoClienteId);
   toast(editandoClienteId?'Cliente atualizado!':'Cliente cadastrado!');
 }
 
@@ -1332,28 +1335,136 @@ function excluirCliente(id){
   toast('Cliente excluído');
 }
 
+function verCliente(id){
+  const c=S.clientes.find(x=>x.id===id);
+  if(!c) return;
+  // Busca todos os eventos desse cliente em todas as pastas
+  const evs=S.pastas.flatMap(p=>(p.eventos||[])
+    .filter(e=>e.clienteId===id)
+    .map(e=>({...e, pastaNome:p.nome, pastaData:p.data}))
+  ).sort((a,b)=>(b.pastaData||'').localeCompare(a.pastaData||''));
+
+  const totalVendas=evs.reduce((a,ev)=>a+calcEvento(ev).totalVendas,0);
+  const totalLucro=evs.reduce((a,ev)=>a+calcEvento(ev).lucroTotal,0);
+  const totalRepasse=evs.reduce((a,ev)=>a+calcEvento(ev).repasseLiquido,0);
+  const pendentes=evs.filter(e=>!e.repasse||e.repasse.status!=='feito').length;
+
+  document.getElementById('cli-view-lista').style.display='none';
+  const det=document.getElementById('cli-view-detalhe');
+  det.style.display='block';
+  det.innerHTML=`
+    <div class="back" onclick="voltarClientes()">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="15 18 9 12 15 6"/></svg>
+      Voltar
+    </div>
+    <div class="ph" style="margin-bottom:1.25rem">
+      <div>
+        <div class="ph-title">${c.nome}</div>
+        <div class="ph-sub">${c.doc||'—'}${c.email?' · '+c.email:''}${c.tel?' · '+c.tel:''}</div>
+        ${c.end?`<div style="font-size:12px;color:var(--muted);margin-top:2px">${c.end}</div>`:''}
+        ${c.obs?`<div style="font-size:12px;color:var(--muted);font-style:italic;margin-top:2px">${c.obs}</div>`:''}
+      </div>
+      <button class="btn btn-sm" onclick="abrirModalCliente('${c.id}')">Editar</button>
+    </div>
+    <div class="metrics" style="margin-bottom:1.25rem">
+      <div class="metric"><div class="metric-label">Eventos</div><div class="metric-val">${evs.length}</div></div>
+      <div class="metric"><div class="metric-label">Total vendas</div><div class="metric-val">${brl(totalVendas)}</div></div>
+      <div class="metric hi"><div class="metric-label">Lucro total</div><div class="metric-val">${brl(totalLucro)}</div></div>
+      <div class="metric" style="border:1px solid rgba(90,171,245,.2);background:rgba(90,171,245,.05)">
+        <div class="metric-label">A repassar</div>
+        <div class="metric-val" style="color:var(--blue)">${brl(totalRepasse)}</div>
+        ${pendentes>0?`<div style="font-size:11px;color:var(--amber);margin-top:3px">⏳ ${pendentes} pendente${pendentes>1?'s':''}</div>`:'<div style="font-size:11px;color:var(--green);margin-top:3px">✓ Todos pagos</div>'}
+      </div>
+    </div>
+    ${evs.length===0
+      ? `<div class="card"><div class="empty"><p style="font-size:13px">Nenhum evento vinculado a este cliente</p></div></div>`
+      : `<div class="card">
+          <div class="st">Histórico de eventos</div>
+          ${evs.map(ev=>{
+            const r=calcEvento(ev);
+            const rep=ev.repasse||{};
+            const repOk=rep.status==='feito';
+            return `<div class="ev-row">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                <div style="flex:1;min-width:180px">
+                  ${ev.estabelecimento?`<div style="font-size:11px;color:var(--muted)">${ev.estabelecimento}</div>`:''}
+                  <div style="font-size:14px;font-weight:600">${ev.nome}</div>
+                  <div style="font-size:12px;color:var(--muted);margin-top:2px">
+                    <span style="background:var(--bg3);padding:2px 8px;border-radius:20px">${ev.pastaNome}</span>
+                    ${fmtDate(ev.pastaData)}
+                  </div>
+                  ${ev.cliente?.obs?`<div style="font-size:12px;color:var(--muted);margin-top:4px;font-style:italic">${ev.cliente.obs}</div>`:''}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;min-width:320px">
+                  <div style="background:var(--bg3);border-radius:var(--r);padding:.5rem .75rem">
+                    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Vendas</div>
+                    <div class="mono" style="font-size:12px">${brl(r.totalVendas)}</div>
+                  </div>
+                  <div style="background:rgba(200,245,90,.04);border:1px solid rgba(200,245,90,.12);border-radius:var(--r);padding:.5rem .75rem">
+                    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Lucro NF</div>
+                    <div class="mono" style="font-size:12px;color:var(--accent)">${brl(r.lucroTotal)}</div>
+                  </div>
+                  <div style="background:${repOk?'rgba(90,245,160,.04)':'rgba(90,171,245,.04)'};border:1px solid ${repOk?'rgba(90,245,160,.2)':'rgba(90,171,245,.15)'};border-radius:var(--r);padding:.5rem .75rem">
+                    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Repasse</div>
+                    <div class="mono" style="font-size:12px;color:${repOk?'var(--green)':'var(--blue)'}">${brl(r.repasseLiquido)}</div>
+                    <div style="font-size:10px;margin-top:2px;color:${repOk?'var(--green)':'var(--amber)'}">${repOk?'✓ '+rep.data:'⏳ Pendente'}</div>
+                  </div>
+                </div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`
+    }`;
+}
+
+function voltarClientes(){
+  document.getElementById('cli-view-lista').style.display='block';
+  document.getElementById('cli-view-detalhe').style.display='none';
+}
+
 // Busca no formulário de importação
+let _dropdownAberto = false;
+
 function filtrarClientes(q){
   const dd=document.getElementById('cli-dropdown');
-  if(!q.trim()){dd.style.display='none';return}
-  // Se havia cliente selecionado, esconde para mostrar busca
-  document.getElementById('cli-selecionado').style.display='none';
+  const sel=document.getElementById('cli-selecionado');
+  if(!q||!q.trim()){
+    dd.style.display='none';
+    _dropdownAberto=false;
+    return;
+  }
+  // Esconde cliente selecionado enquanto busca
+  sel.style.display='none';
   document.getElementById('cli-id').value='';
-  const term=q.toLowerCase();
+
+  const term=q.toLowerCase().trim();
+  const termNum=term.replace(/\D/g,'');
   const found=S.clientes.filter(c=>
     c.nome.toLowerCase().includes(term)||
-    (c.doc||'').replace(/\D/g,'').includes(term.replace(/\D/g,''))
+    (termNum&&(c.doc||'').replace(/\D/g,'').includes(termNum))
   );
+
   if(!found.length){
-    dd.innerHTML=`<div style="padding:.75rem 1rem;font-size:13px;color:var(--muted)">Nenhum cliente encontrado</div>`;
-    dd.style.display='block'; return;
+    dd.innerHTML='<div style="padding:.75rem 1rem;font-size:13px;color:var(--muted)">Nenhum cliente encontrado</div>';
+  } else {
+    dd.innerHTML=found.map(c=>
+      `<div data-cli-id="${c.id}" class="dd-item" style="padding:.625rem 1rem;cursor:pointer;border-bottom:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:500">${c.nome}</div>
+        <div style="font-size:11px;color:var(--muted)">${c.doc||'—'}${c.email?' · '+c.email:''}</div>
+      </div>`
+    ).join('');
+    // Eventos nos itens via delegação no dropdown
+    dd.querySelectorAll('.dd-item').forEach(el=>{
+      el.addEventListener('mouseenter',()=>el.style.background='var(--bg4)');
+      el.addEventListener('mouseleave',()=>el.style.background='');
+      el.addEventListener('mousedown', ev=>{
+        ev.preventDefault(); // impede blur no input
+        selecionarCliente(el.dataset.cliId);
+      });
+    });
   }
-  dd.innerHTML=found.map(c=>`
-    <div onmousedown="selecionarCliente('${c.id}')" style="padding:.625rem 1rem;cursor:pointer;border-bottom:1px solid var(--border);transition:.15s" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background=''">
-      <div style="font-size:13px;font-weight:500">${c.nome}</div>
-      <div style="font-size:11px;color:var(--muted)">${c.doc||'—'} ${c.email?'· '+c.email:''}</div>
-    </div>`).join('');
   dd.style.display='block';
+  _dropdownAberto=true;
 }
 
 function selecionarCliente(id){
@@ -1363,22 +1474,32 @@ function selecionarCliente(id){
   document.getElementById('cli-busca').value='';
   document.getElementById('cli-dropdown').style.display='none';
   document.getElementById('cli-sel-nome').textContent=c.nome;
-  document.getElementById('cli-sel-info').textContent=`${c.doc||''}${c.email?' · '+c.email:''}${c.tel?' · '+c.tel:''}`;
+  document.getElementById('cli-sel-info').textContent=
+    `${c.doc||''}${c.email?' · '+c.email:''}${c.tel?' · '+c.tel:''}`;
   document.getElementById('cli-selecionado').style.display='block';
+  _dropdownAberto=false;
 }
 
 function limparClienteSelecionado(){
   document.getElementById('cli-id').value='';
   document.getElementById('cli-busca').value='';
+  document.getElementById('cli-dropdown').style.display='none';
   document.getElementById('cli-selecionado').style.display='none';
-  document.getElementById('cli-busca').focus();
+  _dropdownAberto=false;
+  setTimeout(()=>{
+    const b=document.getElementById('cli-busca');
+    if(b) b.focus();
+  },50);
 }
 
-// Fechar dropdown ao clicar fora
-document.addEventListener('click', e=>{
+// Fechar dropdown ao clicar fora — só fecha se o clique não foi no dropdown nem no input
+document.addEventListener('mousedown', e=>{
   const dd=document.getElementById('cli-dropdown');
-  if(dd && !dd.contains(e.target) && e.target.id!=='cli-busca'){
+  const input=document.getElementById('cli-busca');
+  if(!dd) return;
+  if(!dd.contains(e.target) && e.target!==input){
     dd.style.display='none';
+    _dropdownAberto=false;
   }
 });
 
