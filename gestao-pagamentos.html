@@ -490,6 +490,20 @@ function renderPasta(){
     <div class="metric hi"><div class="metric-label">Lucro total (NF)</div><div class="metric-val">${brl(t.lucro)}</div></div>
     <div class="metric" style="border:1px solid rgba(90,171,245,.2);background:rgba(90,171,245,.05)"><div class="metric-label">A repassar clientes</div><div class="metric-val" style="color:var(--blue)">${brl(t.repasseLiquido)}</div></div>
     <div class="metric"><div class="metric-label">Lucro nas taxas</div><div class="metric-val">${brl(t.lucroTaxas)}</div></div>`;
+  // Badge de pendentes de repasse
+  const pendentes=(p.eventos||[]).filter(e=>!e.repasse||e.repasse.status!=='feito');
+  const transferidos=(p.eventos||[]).filter(e=>e.repasse&&e.repasse.status==='feito');
+  if((p.eventos||[]).length>0){
+    const statusEl=document.createElement('div');
+    statusEl.style='display:flex;gap:8px;margin-bottom:1.25rem;align-items:center;flex-wrap:wrap';
+    statusEl.innerHTML=`
+      <span style="font-size:12px;color:var(--muted)">Status dos repasses:</span>
+      ${pendentes.length>0?`<span style="font-size:12px;padding:3px 10px;border-radius:20px;background:rgba(245,166,35,.1);color:var(--amber);font-weight:500">⏳ ${pendentes.length} pendente${pendentes.length>1?'s':''}</span>`:''}
+      ${transferidos.length>0?`<span style="font-size:12px;padding:3px 10px;border-radius:20px;background:rgba(90,245,160,.1);color:var(--green);font-weight:500">✓ ${transferidos.length} transferido${transferidos.length>1?'s':''}</span>`:''}
+      ${pendentes.length===0?`<span style="font-size:12px;padding:3px 10px;border-radius:20px;background:rgba(90,245,160,.1);color:var(--green);font-weight:500">✓ Todos transferidos!</span>`:''}
+    `;
+    document.getElementById('lista-eventos-pasta').before(statusEl);
+  }
   // eventos
   const el=document.getElementById('lista-eventos-pasta');
   if(!(p.eventos||[]).length){
@@ -499,10 +513,18 @@ function renderPasta(){
   el.innerHTML=p.eventos.map(ev=>{
     const r=calcEvento(ev);
     const cli=ev.cliente||{};
-    return `<div class="ev-row">
+    const rep=ev.repasse||{status:'pendente',data:null};
+    const repOk=rep.status==='feito';
+    return `<div class="ev-row" style="${repOk?'opacity:.75':''}">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div style="flex:1;min-width:200px">
-          <div style="font-size:14px;font-weight:600">${ev.nome}</div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="font-size:14px;font-weight:600">${ev.nome}</div>
+            ${repOk
+              ? `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(90,245,160,.12);color:var(--green);font-weight:500">✓ Transferido</span>`
+              : `<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:rgba(245,166,35,.1);color:var(--amber);font-weight:500">⏳ Pendente</span>`
+            }
+          </div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px">${ev.arquivo||''}</div>
           ${cli.nome||cli.doc?`<div style="margin-top:8px;padding:8px 10px;background:var(--bg3);border-radius:var(--r);font-size:12px">
             ${cli.nome?`<div><span style="color:var(--muted)">Cliente:</span> ${cli.nome}</div>`:''}
@@ -511,19 +533,35 @@ function renderPasta(){
             ${cli.tel?`<div><span style="color:var(--muted)">Tel:</span> ${cli.tel}</div>`:''}
             ${cli.obs?`<div><span style="color:var(--muted)">Obs:</span> ${cli.obs}</div>`:''}
           </div>`:''}
+          <div style="margin-top:10px;padding:10px 12px;border-radius:var(--r);border:1px solid ${repOk?'rgba(90,245,160,.25)':'rgba(245,166,35,.2)'};background:${repOk?'rgba(90,245,160,.04)':'rgba(245,166,35,.04)'}">
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Repasse ao cliente</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+              <div>
+                <div class="mono" style="font-size:15px;font-weight:600;color:${repOk?'var(--green)':'var(--blue)'}">${brl(r.repasseLiquido)}</div>
+                ${repOk&&rep.data?`<div style="font-size:11px;color:var(--muted);margin-top:2px">Transferido em ${rep.data}</div>`:''}
+              </div>
+              ${repOk
+                ? `<button class="btn btn-sm" onclick="marcarRepasse('${ev.id}','pendente')" style="font-size:11px;color:var(--muted)">Desfazer</button>`
+                : `<button class="btn btn-sm" onclick="marcarRepasse('${ev.id}','feito')" style="border-color:rgba(90,245,160,.3);color:var(--green);font-size:12px">
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg>
+                    Confirmar transferência
+                  </button>`
+              }
+            </div>
+          </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;min-width:420px">
           <div style="background:var(--bg3);border-radius:var(--r);padding:.625rem .875rem">
             <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Vendas</div>
             <div class="mono" style="font-size:13px">${brl(r.totalVendas)}</div>
           </div>
-          <div style="background:rgba(90,171,245,.05);border:1px solid rgba(90,171,245,.15);border-radius:var(--r);padding:.625rem .875rem">
-            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">A repassar</div>
-            <div class="mono" style="font-size:13px;color:var(--blue)">${brl(r.repasseLiquido)}</div>
-          </div>
           <div style="background:rgba(200,245,90,.04);border:1px solid rgba(200,245,90,.12);border-radius:var(--r);padding:.625rem .875rem">
             <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Lucro NF</div>
             <div class="mono" style="font-size:13px;font-weight:600;color:var(--accent)">${brl(r.lucroTotal)}</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:var(--r);padding:.625rem .875rem">
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Markup</div>
+            <div style="font-size:12px">${mbadge(r.markup)}</div>
           </div>
           <div style="background:var(--bg3);border-radius:var(--r);padding:.625rem .875rem">
             <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Repasse bruto</div>
@@ -534,8 +572,8 @@ function renderPasta(){
             <div class="mono" style="font-size:12px;color:var(--amber)">${brl(r.aluguel)}</div>
           </div>
           <div style="background:var(--bg3);border-radius:var(--r);padding:.625rem .875rem">
-            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Markup</div>
-            <div style="font-size:12px">${mbadge(r.markup)}</div>
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Lucro taxas</div>
+            <div class="mono" style="font-size:12px;color:var(--accent)">${brl(r.lucroTaxas)}</div>
           </div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
@@ -548,6 +586,19 @@ function renderPasta(){
       </div>
     </div>`;
   }).join('');
+}
+
+function marcarRepasse(evId, status){
+  const idx=S.pastaAtiva.eventos.findIndex(e=>e.id===evId);
+  if(idx<0) return;
+  const agora=new Date().toLocaleDateString('pt-BR');
+  S.pastaAtiva.eventos[idx].repasse={status, data: status==='feito'?agora:null};
+  const pi=S.pastas.findIndex(p=>p.id===S.pastaAtiva.id);
+  if(pi>=0) S.pastas[pi]=S.pastaAtiva;
+  save();
+  if(S.driveConnected) sincronizarDrive();
+  renderPasta();
+  toast(status==='feito'?'Transferência confirmada!':'Marcado como pendente');
 }
 
 function voltarLista(){showView('lista');renderLista()}
