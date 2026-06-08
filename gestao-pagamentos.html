@@ -608,7 +608,7 @@ function marcarRepasse(evId, status){
 
 function voltarLista(){showView('lista');renderLista()}
 function voltarPasta(){S.editandoEvento=null;showView('pasta');renderPasta()}
-function abrirImport(){S.importData=null;S.maqTemp=[];S.editandoEvento=null;document.getElementById('import-form').style.display='none';document.getElementById('finput').value='';limparClienteSelecionado();showView('import')}
+function abrirImport(){S.importData=null;S.maqTemp=[];S.editandoEvento=null;document.getElementById('import-form').style.display='none';document.getElementById('finput').value='';document.getElementById('cli-obs').value='';limparClienteSelecionado();showView('import')}
 
 function showView(v){
   document.getElementById('view-lista').style.display=v==='lista'?'block':'none';
@@ -709,7 +709,7 @@ function lerArquivo(input){
         }
       }
       if(!nome) nome=file.name.replace(/\.xlsx?/i,'').replace(/_/g,' ');
-      S.importData={nome:cardapio||nome, estabelecimento, cardapio, debito,credito,pix,totalRepasse,arquivo:file.name};
+      S.importData={nome:cardapio||nome, estabelecimento, cardapio, debito,credito,pix,totalRepasse,arquivo:file.name,fileData:e.target.result};
       S.maqTemp=[];
       mostrarFormImport();
     }catch(err){toast('Erro ao ler: '+err.message,'err')}
@@ -833,7 +833,7 @@ function confirmarEvento(){
   const evId=S.editandoEvento?S.editandoEvento.id:'ev_'+Date.now();
   const ev={
     id:evId,
-    nome:d.nome, estabelecimento:d.estabelecimento||'', arquivo:d.arquivo,
+    nome:d.nome, estabelecimento:d.estabelecimento||'', arquivo:d.arquivo, fileData:d.fileData||null,
     debito:d.debito, credito:d.credito, pix:d.pix,
     totalRepasse:d.totalRepasse||0,
     tcDebito:tcD, tcCredito:tcC, tcPix:tcP,
@@ -851,7 +851,19 @@ function confirmarEvento(){
   const idx=S.pastas.findIndex(p=>p.id===S.pastaAtiva.id);
   if(idx>=0) S.pastas[idx]=S.pastaAtiva;
   save();
-  if(S.driveConnected) sincronizarDrive();
+  // Upload do arquivo original para o Drive
+  if(S.driveConnected&&d.fileData&&ev.arquivo){
+    const folderId=S.pastaAtiva.driveFolderId;
+    if(folderId){
+      driveUploadOriginal(d.fileData, ev.arquivo, folderId);
+    } else {
+      // Garante estrutura e depois faz upload
+      driveGarantirEstrutura(S.pastaAtiva).then(fid=>{
+        driveUploadOriginal(d.fileData, ev.arquivo, fid);
+      });
+    }
+    sincronizarDrive();
+  }
   S.importData=null; S.maqTemp=[]; S.editandoEvento=null;
   voltarPasta();
 }
@@ -1166,6 +1178,36 @@ async function driveUploadXlsx(wb, filename, folderId){
   });
 }
 
+// Faz upload do arquivo original do Bilhete Premium para a pasta do Drive
+async function driveUploadOriginal(fileData, filename, folderId){
+  if(!fileData||!folderId) return;
+  try{
+    // Verifica se já existe e deleta para evitar duplicatas
+    const q = encodeURIComponent(`name='${filename}' and '${folderId}' in parents and trashed=false`);
+    const check = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`,{
+      headers:{Authorization:`Bearer ${S.driveToken}`}
+    });
+    const existing = await check.json();
+    if(existing.files&&existing.files.length>0){
+      await fetch(`https://www.googleapis.com/drive/v3/files/${existing.files[0].id}`,{
+        method:'DELETE', headers:{Authorization:`Bearer ${S.driveToken}`}
+      });
+    }
+    const blob = new Blob([fileData], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const meta = JSON.stringify({
+      name: filename,
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      parents: [folderId]
+    });
+    const form = new FormData();
+    form.append('metadata', new Blob([meta], {type:'application/json'}));
+    form.append('file', blob);
+    await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{
+      method:'POST', headers:{Authorization:`Bearer ${S.driveToken}`}, body:form
+    });
+  }catch(e){ console.warn('Erro upload original:', e.message); }
+}
+
 // Cria pasta no Drive ao criar pasta local
 async function driveCriarPastaEvento(pasta){
   if(!S.driveConnected||!S.driveToken) return;
@@ -1284,6 +1326,9 @@ function excluirCliente(id){
 function filtrarClientes(q){
   const dd=document.getElementById('cli-dropdown');
   if(!q.trim()){dd.style.display='none';return}
+  // Se havia cliente selecionado, esconde para mostrar busca
+  document.getElementById('cli-selecionado').style.display='none';
+  document.getElementById('cli-id').value='';
   const term=q.toLowerCase();
   const found=S.clientes.filter(c=>
     c.nome.toLowerCase().includes(term)||
