@@ -813,10 +813,12 @@ function editarEvento(id){
   showView('import');
   document.getElementById('import-form').style.display='none';
   document.getElementById('finput').value='';
+  document.getElementById('cli-obs').value='';
+  limparClienteSelecionado();
   mostrarFormImport();
-  // Preenche cliente após renderizar
+  // Preenche cliente e obs após renderizar
   if(ev.clienteId) setTimeout(()=>selecionarCliente(ev.clienteId),50);
-  if(ev.cliente?.obs) setTimeout(()=>{document.getElementById('cli-obs').value=ev.cliente.obs||''},60);
+  setTimeout(()=>{document.getElementById('cli-obs').value=ev.cliente?.obs||''},60);
 }
 
 function confirmarEvento(){
@@ -828,7 +830,8 @@ function confirmarEvento(){
   const cliId=document.getElementById('cli-id').value||null;
   const cliObj=(()=>{
     const c=cliId?S.clientes.find(x=>x.id===cliId):null;
-    return c ? {...c, obs:document.getElementById('cli-obs').value.trim()||c.obs} : {obs:document.getElementById('cli-obs').value.trim()};
+    const obsVal = document.getElementById('cli-obs').value.trim();
+    return c ? {...c, obs:obsVal} : {obs:obsVal};
   })();
   const evId=S.editandoEvento?S.editandoEvento.id:'ev_'+Date.now();
   const ev={
@@ -1376,6 +1379,40 @@ document.addEventListener('click', e=>{
 load();
 showView('lista');
 renderLista();
+
+// Reconecta Drive automaticamente se havia Client ID salvo
+function reconectarDriveAuto(){
+  const cid = S.config.driveClientId;
+  if(!cid) return;
+  const iniciar = () => {
+    try{
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: cid,
+        scope: DRIVE_SCOPE,
+        prompt: '', // sem prompt = silencioso se já autorizado
+        callback: async resp => {
+          if(resp.error) return; // silencioso se falhar
+          S.driveToken = resp.access_token;
+          S.driveConnected = true;
+          document.getElementById('drive-dot').classList.add('on');
+          document.getElementById('drive-label').textContent = 'Drive conectado';
+          await carregarDoDrive();
+        }
+      });
+      client.requestAccessToken({prompt:''});
+    }catch(e){ /* silencioso */ }
+  };
+  if(typeof google === 'undefined' || !google.accounts){
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.onload = iniciar;
+    document.head.appendChild(s);
+  } else {
+    iniciar();
+  }
+}
+// Aguarda 1s para garantir que a página carregou
+setTimeout(reconectarDriveAuto, 1000);
 </script>
 </body>
 </html>
