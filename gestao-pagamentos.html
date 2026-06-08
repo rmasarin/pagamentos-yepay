@@ -268,7 +268,10 @@ hr{border:none;border-top:1px solid var(--border);margin:1rem 0}
       Novo cliente
     </button>
   </div>
-  <div class="card" id="lista-clientes"></div>
+  <div id="cli-view-lista">
+    <div class="card" id="lista-clientes"></div>
+  </div>
+  <div id="cli-view-detalhe" style="display:none"></div>
 </div>
 
 <!-- CONFIG -->
@@ -608,7 +611,7 @@ function marcarRepasse(evId, status){
 
 function voltarLista(){showView('lista');renderLista()}
 function voltarPasta(){S.editandoEvento=null;showView('pasta');renderPasta()}
-function abrirImport(){S.importData=null;S.maqTemp=[];S.editandoEvento=null;document.getElementById('import-form').style.display='none';document.getElementById('finput').value='';document.getElementById('cli-obs').value='';limparClienteSelecionado();showView('import')}
+function abrirImport(){S.importData=null;S.maqTemp=[];S.editandoEvento=null;document.getElementById('import-form').style.display='none';document.getElementById('finput').value='';limparClienteSelecionado();showView('import')}
 
 function showView(v){
   document.getElementById('view-lista').style.display=v==='lista'?'block':'none';
@@ -735,6 +738,8 @@ function mostrarFormImport(){
   document.getElementById('tc-debito').value=evEdit?evEdit.tcDebito:(S.config.tcEvDebito||2);
   document.getElementById('tc-credito').value=evEdit?evEdit.tcCredito:(S.config.tcEvCredito||4);
   document.getElementById('tc-pix').value=evEdit?evEdit.tcPix:(S.config.tcEvPix||2.2);
+  // Limpa obs para novo evento; edição preenche depois via setTimeout
+  if(!evEdit) document.getElementById('cli-obs').value='';
   renderMaqLista();
   atualizarCalc();
   // Título dinâmico editar vs novo
@@ -818,7 +823,7 @@ function editarEvento(id){
   mostrarFormImport();
   // Preenche cliente e obs após renderizar
   if(ev.clienteId) setTimeout(()=>selecionarCliente(ev.clienteId),50);
-  setTimeout(()=>{document.getElementById('cli-obs').value=ev.cliente?.obs||''},60);
+  setTimeout(()=>{document.getElementById('cli-obs').value=ev.cliente?.obs||''},100);
 }
 
 function confirmarEvento(){
@@ -1248,6 +1253,8 @@ async function salvarPlanilhaNoDrive(wb, filename, pasta){
 let editandoClienteId = null;
 
 function renderClientes(){
+  document.getElementById('cli-view-lista').style.display='block';
+  document.getElementById('cli-view-detalhe').style.display='none';
   const el=document.getElementById('lista-clientes');
   if(!el) return;
   if(!S.clientes.length){
@@ -1256,7 +1263,7 @@ function renderClientes(){
   }
   el.innerHTML=S.clientes.map(c=>{
     const evs=S.pastas.flatMap(p=>(p.eventos||[]).filter(e=>e.clienteId===c.id));
-    return `<div class="pasta-item">
+    return `<div class="pasta-item" onclick="verCliente('${c.id}')" style="cursor:pointer">
       <div style="flex:1">
         <div style="font-size:14px;font-weight:500">${c.nome}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:2px">${c.doc||'—'} ${c.email?'· '+c.email:''}</div>
@@ -1268,8 +1275,8 @@ function renderClientes(){
         <div style="text-align:right">
           <div style="font-size:12px;color:var(--muted)">${evs.length} evento${evs.length!==1?'s':''}</div>
         </div>
-        <button class="btn btn-sm" onclick="abrirModalCliente('${c.id}')">Editar</button>
-        <button class="btn btn-danger btn-sm" onclick="excluirCliente('${c.id}')">
+        <button class="btn btn-sm" onclick="event.stopPropagation();abrirModalCliente('${c.id}')">Editar</button>
+        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();excluirCliente('${c.id}')">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
         </button>
       </div>
@@ -1342,7 +1349,7 @@ function filtrarClientes(q){
     dd.style.display='block'; return;
   }
   dd.innerHTML=found.map(c=>`
-    <div onclick="selecionarCliente('${c.id}')" style="padding:.625rem 1rem;cursor:pointer;border-bottom:1px solid var(--border);transition:.15s" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background=''">
+    <div onmousedown="selecionarCliente('${c.id}')" style="padding:.625rem 1rem;cursor:pointer;border-bottom:1px solid var(--border);transition:.15s" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background=''">
       <div style="font-size:13px;font-weight:500">${c.nome}</div>
       <div style="font-size:11px;color:var(--muted)">${c.doc||'—'} ${c.email?'· '+c.email:''}</div>
     </div>`).join('');
@@ -1374,6 +1381,105 @@ document.addEventListener('click', e=>{
     dd.style.display='none';
   }
 });
+
+// ─── Histórico do cliente ────────────────────────────────────────────
+function verCliente(id){
+  const c = S.clientes.find(x=>x.id===id);
+  if(!c) return;
+  // Busca todos os eventos deste cliente com info da pasta
+  const evs = S.pastas.flatMap(p=>
+    (p.eventos||[])
+      .filter(e=>e.clienteId===id)
+      .map(e=>({...e, pastaNome:p.nome, pastaData:p.data, pastaId:p.id}))
+  ).sort((a,b)=>(b.pastaData||'').localeCompare(a.pastaData||''));
+
+  // Totais
+  const totVendas = evs.reduce((a,e)=>a+calcEvento(e).totalVendas,0);
+  const totLucro  = evs.reduce((a,e)=>a+calcEvento(e).lucroTotal,0);
+  const totRepasse= evs.reduce((a,e)=>a+calcEvento(e).repasseLiquido,0);
+  const pendentes = evs.filter(e=>!e.repasse||e.repasse.status!=='feito').length;
+
+  document.getElementById('cli-view-lista').style.display='none';
+  const d = document.getElementById('cli-view-detalhe');
+  d.style.display='block';
+  d.innerHTML=`
+    <div class="back" onclick="voltarClientes()">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="15 18 9 12 15 6"/></svg>
+      Voltar
+    </div>
+    <div class="ph" style="margin-bottom:1.25rem">
+      <div>
+        <div class="ph-title">${c.nome}</div>
+        <div class="ph-sub">${c.doc||''}${c.email?' · '+c.email:''}${c.tel?' · '+c.tel:''}</div>
+        ${c.end?`<div style="font-size:12px;color:var(--muted);margin-top:2px">${c.end}</div>`:''}
+        ${c.obs?`<div style="font-size:12px;color:var(--muted);font-style:italic;margin-top:2px">${c.obs}</div>`:''}
+      </div>
+      <button class="btn btn-sm" onclick="abrirModalCliente('${c.id}')">Editar cliente</button>
+    </div>
+    <div class="metrics" style="margin-bottom:1.25rem">
+      <div class="metric"><div class="metric-label">Eventos</div><div class="metric-val">${evs.length}</div></div>
+      <div class="metric"><div class="metric-label">Total vendas</div><div class="metric-val">${brl(totVendas)}</div></div>
+      <div class="metric" style="border:1px solid rgba(90,171,245,.2);background:rgba(90,171,245,.05)"><div class="metric-label">Total repassado</div><div class="metric-val" style="color:var(--blue)">${brl(totRepasse)}</div></div>
+      <div class="metric hi"><div class="metric-label">Lucro total</div><div class="metric-val">${brl(totLucro)}</div></div>
+    </div>
+    ${pendentes>0?`<div style="padding:8px 12px;background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.2);border-radius:var(--r);font-size:12px;color:var(--amber);margin-bottom:1rem">⏳ ${pendentes} repasse${pendentes>1?'s':''} pendente${pendentes>1?'s':''} para este cliente</div>`:''}
+    <div class="card">
+      ${evs.length===0
+        ? `<div class="empty"><p style="font-size:13px">Nenhum evento registrado para este cliente.</p></div>`
+        : evs.map(ev=>{
+            const r=calcEvento(ev);
+            const repOk=ev.repasse&&ev.repasse.status==='feito';
+            return `<div class="ev-row">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                <div style="flex:1;min-width:180px">
+                  <div style="font-size:11px;color:var(--muted);margin-bottom:2px">${ev.pastaNome} · ${fmtDate(ev.pastaData)}</div>
+                  ${ev.estabelecimento?`<div style="font-size:11px;color:var(--muted2)">${ev.estabelecimento}</div>`:''}
+                  <div style="font-size:14px;font-weight:600;margin-top:1px">${ev.nome}</div>
+                  ${ev.cliente?.obs?`<div style="font-size:12px;color:var(--muted);margin-top:3px;font-style:italic">${ev.cliente.obs}</div>`:''}
+                  <div style="margin-top:6px">
+                    ${repOk
+                      ? `<span style="font-size:11px;padding:2px 8px;border-radius:20px;background:rgba(90,245,160,.12);color:var(--green);font-weight:500">✓ Transferido${ev.repasse.data?' em '+ev.repasse.data:''}</span>`
+                      : `<span style="font-size:11px;padding:2px 8px;border-radius:20px;background:rgba(245,166,35,.1);color:var(--amber);font-weight:500">⏳ Repasse pendente</span>`
+                    }
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;min-width:320px">
+                  <div style="background:var(--bg3);border-radius:var(--r);padding:.5rem .75rem">
+                    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Vendas</div>
+                    <div class="mono" style="font-size:12px">${brl(r.totalVendas)}</div>
+                  </div>
+                  <div style="background:rgba(90,171,245,.05);border:1px solid rgba(90,171,245,.15);border-radius:var(--r);padding:.5rem .75rem">
+                    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">A repassar</div>
+                    <div class="mono" style="font-size:12px;color:var(--blue)">${brl(r.repasseLiquido)}</div>
+                  </div>
+                  <div style="background:rgba(200,245,90,.04);border:1px solid rgba(200,245,90,.12);border-radius:var(--r);padding:.5rem .75rem">
+                    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Lucro NF</div>
+                    <div class="mono" style="font-size:12px;font-weight:600;color:var(--accent)">${brl(r.lucroTotal)}</div>
+                  </div>
+                  <div style="background:var(--bg3);border-radius:var(--r);padding:.5rem .75rem">
+                    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Débito</div>
+                    <div class="mono" style="font-size:12px">${brl(ev.debito)}</div>
+                  </div>
+                  <div style="background:var(--bg3);border-radius:var(--r);padding:.5rem .75rem">
+                    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Crédito</div>
+                    <div class="mono" style="font-size:12px">${brl(ev.credito)}</div>
+                  </div>
+                  <div style="background:var(--bg3);border-radius:var(--r);padding:.5rem .75rem">
+                    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">PIX</div>
+                    <div class="mono" style="font-size:12px">${brl(ev.pix)}</div>
+                  </div>
+                </div>
+              </div>
+            </div>`;
+          }).join('')
+      }
+    </div>`;
+}
+
+function voltarClientes(){
+  document.getElementById('cli-view-detalhe').style.display='none';
+  document.getElementById('cli-view-lista').style.display='block';
+}
 
 // ─── Init ─────────────────────────────────────────────────────────────
 load();
