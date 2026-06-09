@@ -124,6 +124,10 @@ hr{border:none;border-top:1px solid var(--border);margin:1rem 0}
     <div class="logo-name">Pagamentos</div>
   </div>
   <div class="nav-sep">Principal</div>
+  <div class="nav-item" onclick="goPage('dashboard')">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    Dashboard
+  </div>
   <div class="nav-item active" onclick="goPage('pastas')">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
     Pagamentos
@@ -145,6 +149,48 @@ hr{border:none;border-top:1px solid var(--border);margin:1rem 0}
 </nav>
 
 <main class="main">
+
+<!-- DASHBOARD -->
+<div class="page" id="page-dashboard">
+  <div class="ph">
+    <div><div class="ph-title">Dashboard</div><div class="ph-sub">Visão geral dos seus rendimentos</div></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label style="font-size:12px;color:var(--muted)">Ano:</label>
+      <select id="dash-ano" onchange="renderDashboard()" style="width:100px;padding:6px 10px"></select>
+    </div>
+  </div>
+  <!-- Métricas do ano -->
+  <div id="dash-metrics-ano" class="metrics" style="grid-template-columns:repeat(4,1fr);margin-bottom:1.5rem"></div>
+  <!-- Gráfico barras mensais -->
+  <div class="card" style="margin-bottom:1rem">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem">
+      <div class="st" style="margin:0">Rendimento mensal</div>
+      <div style="display:flex;gap:12px;font-size:11px">
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:var(--accent);display:inline-block"></span>Lucro</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:var(--blue);display:inline-block"></span>Vendas</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(255,107,107,.6);display:inline-block"></span>Aluguel</span>
+      </div>
+    </div>
+    <div id="dash-chart-bars" style="display:flex;align-items:flex-end;gap:6px;height:200px;padding:0 4px"></div>
+    <div id="dash-chart-labels" style="display:flex;gap:6px;margin-top:8px;padding:0 4px"></div>
+  </div>
+  <!-- Gráfico linha lucro acumulado -->
+  <div class="card" style="margin-bottom:1rem">
+    <div class="st" style="margin-bottom:1.25rem">Lucro acumulado no ano</div>
+    <svg id="dash-line-chart" width="100%" height="140" viewBox="0 0 860 140" preserveAspectRatio="none" style="overflow:visible"></svg>
+  </div>
+  <!-- Top eventos -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="card">
+      <div class="st" style="margin-bottom:1rem">Top 5 eventos por lucro</div>
+      <div id="dash-top-lucro"></div>
+    </div>
+    <div class="card">
+      <div class="st" style="margin-bottom:1rem">Top 5 eventos por vendas</div>
+      <div id="dash-top-vendas"></div>
+    </div>
+  </div>
+</div>
 
 <!-- PASTAS -->
 <div class="page active" id="page-pastas">
@@ -457,6 +503,7 @@ function goPage(id){
   document.getElementById('page-'+id).classList.add('active');
   const nav=document.querySelector(`.nav-item[onclick="goPage('${id}')"]`);
   if(nav) nav.classList.add('active');
+  if(id==='dashboard') renderDashboard();
   if(id==='pastas') renderLista();
   if(id==='clientes'){document.getElementById('cli-view-lista').style.display='block';document.getElementById('cli-view-detalhe').style.display='none';renderClientes();}
   if(id==='config') loadConfig();
@@ -1680,6 +1727,136 @@ function verCliente(id){
 function voltarClientes(){
   document.getElementById('cli-view-detalhe').style.display='none';
   document.getElementById('cli-view-lista').style.display='block';
+}
+
+// ─── Dashboard ───────────────────────────────────────────────────────
+const MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+const MESES_FULL = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+function getDadosMensais(ano){
+  const meses = Array.from({length:12},(_,i)=>({
+    mes:i, vendas:0, lucro:0, aluguel:0, repasse:0, lucroTaxas:0, eventos:0
+  }));
+  S.pastas.forEach(p=>{
+    if(!p.data) return;
+    const d = new Date(p.data+'T12:00:00');
+    if(d.getFullYear() !== ano) return;
+    const m = d.getMonth();
+    (p.eventos||[]).forEach(ev=>{
+      const r = calcEvento(ev);
+      meses[m].vendas     += r.totalVendas;
+      meses[m].lucro      += r.lucroTotal;
+      meses[m].aluguel    += r.aluguel;
+      meses[m].repasse    += r.repasseLiquido;
+      meses[m].lucroTaxas += r.lucroTaxas;
+      meses[m].eventos    += 1;
+    });
+  });
+  return meses;
+}
+
+function renderDashboard(){
+  // Preenche select de anos
+  const anos = [...new Set(S.pastas.map(p=>p.data?new Date(p.data+'T12:00:00').getFullYear():null).filter(Boolean))].sort((a,b)=>b-a);
+  if(!anos.length) anos.push(new Date().getFullYear());
+  const selAno = document.getElementById('dash-ano');
+  const anoAtual = +selAno.value || anos[0];
+  selAno.innerHTML = anos.map(a=>`<option value="${a}" ${a===anoAtual?'selected':''}>${a}</option>`).join('');
+  const ano = +selAno.value;
+
+  const meses = getDadosMensais(ano);
+  const totalAno = meses.reduce((a,m)=>({
+    vendas:a.vendas+m.vendas, lucro:a.lucro+m.lucro,
+    aluguel:a.aluguel+m.aluguel, repasse:a.repasse+m.repasse,
+    lucroTaxas:a.lucroTaxas+m.lucroTaxas, eventos:a.eventos+m.eventos
+  }), {vendas:0,lucro:0,aluguel:0,repasse:0,lucroTaxas:0,eventos:0});
+
+  // ── Métricas do ano ───────────────────────────────────────────────
+  const mkp = totalAno.vendas>0 ? (totalAno.lucro/totalAno.vendas*100) : 0;
+  document.getElementById('dash-metrics-ano').innerHTML=`
+    <div class="metric"><div class="metric-label">Total vendas ${ano}</div><div class="metric-val">${brl(totalAno.vendas)}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">${totalAno.eventos} eventos</div></div>
+    <div class="metric"><div class="metric-label">Total aluguel</div><div class="metric-val" style="color:var(--amber)">${brl(totalAno.aluguel)}</div></div>
+    <div class="metric"><div class="metric-label">Lucro nas taxas</div><div class="metric-val">${brl(totalAno.lucroTaxas)}</div></div>
+    <div class="metric hi"><div class="metric-label">Lucro total</div><div class="metric-val">${brl(totalAno.lucro)}</div><div style="font-size:11px;color:var(--accent);margin-top:3px">markup ${pct(mkp)}</div></div>`;
+
+  // ── Gráfico de barras ─────────────────────────────────────────────
+  const maxVal = Math.max(...meses.map(m=>m.vendas), 1);
+  const barsEl = document.getElementById('dash-chart-bars');
+  const labelsEl = document.getElementById('dash-chart-labels');
+  const colW = `calc((100% - ${11*6}px) / 12)`;
+
+  barsEl.innerHTML = meses.map((m,i)=>{
+    const hVendas  = Math.round((m.vendas/maxVal)*180);
+    const hLucro   = Math.round((m.lucro/maxVal)*180);
+    const hAluguel = Math.round((m.aluguel/maxVal)*180);
+    const hasData  = m.vendas > 0;
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:2px;position:relative;cursor:${hasData?'pointer':'default'}"
+      ${hasData?`title="${MESES_FULL[i]}\nVendas: ${brl(m.vendas)}\nLucro: ${brl(m.lucro)}\nAluguel: ${brl(m.aluguel)}"`:''}>
+      <div style="width:100%;display:flex;gap:1px;align-items:flex-end;justify-content:center">
+        <div style="width:33%;height:${hVendas}px;background:var(--blue);border-radius:3px 3px 0 0;opacity:.7;transition:.3s"></div>
+        <div style="width:33%;height:${hLucro}px;background:var(--accent);border-radius:3px 3px 0 0;transition:.3s"></div>
+        <div style="width:33%;height:${hAluguel}px;background:rgba(255,107,107,.6);border-radius:3px 3px 0 0;transition:.3s"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  labelsEl.innerHTML = meses.map((m,i)=>`
+    <div style="flex:1;text-align:center;font-size:10px;color:${m.vendas>0?'var(--text)':'var(--muted2)'}">${MESES_PT[i]}</div>
+  `).join('');
+
+  // ── Gráfico de linha (lucro acumulado) ───────────────────────────
+  const acum = [];
+  let soma = 0;
+  meses.forEach(m=>{ soma+=m.lucro; acum.push(soma); });
+  const maxAcum = Math.max(...acum, 1);
+  const W = 860, H = 120, PAD = 10;
+  const pts = acum.map((v,i)=>{
+    const x = PAD + (i/(11)) * (W - PAD*2);
+    const y = H - PAD - ((v/maxAcum)*(H-PAD*2));
+    return {x,y,v,i};
+  }).filter(p=>p.v>0||p.i===0);
+
+  if(pts.length>1){
+    const polyline = pts.map(p=>`${p.x},${p.y}`).join(' ');
+    const area = `M${pts[0].x},${H-PAD} ` + pts.map(p=>`L${p.x},${p.y}`).join(' ') + ` L${pts[pts.length-1].x},${H-PAD} Z`;
+    document.getElementById('dash-line-chart').innerHTML=`
+      <defs><linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#c8f55a" stop-opacity="0.2"/>
+        <stop offset="100%" stop-color="#c8f55a" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path d="${area}" fill="url(#grad)"/>
+      <polyline points="${polyline}" fill="none" stroke="#c8f55a" stroke-width="2" stroke-linejoin="round"/>
+      ${pts.map(p=>`
+        <circle cx="${p.x}" cy="${p.y}" r="3" fill="#c8f55a"/>
+        <text x="${p.x}" y="${p.y-8}" text-anchor="middle" font-size="9" fill="#888">${p.v>0?brl(p.v).replace('R$ ',''):''}</text>
+      `).join('')}
+      <line x1="${PAD}" y1="${H-PAD}" x2="${W-PAD}" y2="${H-PAD}" stroke="#2a2a2a" stroke-width="1"/>`;
+  } else {
+    document.getElementById('dash-line-chart').innerHTML=`<text x="430" y="70" text-anchor="middle" font-size="13" fill="#555">Sem dados suficientes</text>`;
+  }
+
+  // ── Top 5 eventos ─────────────────────────────────────────────────
+  const todosEvs = S.pastas
+    .filter(p=>{ if(!p.data) return false; const d=new Date(p.data+'T12:00:00'); return d.getFullYear()===ano; })
+    .flatMap(p=>(p.eventos||[]).map(ev=>({...ev, pastaNome:p.nome, r:calcEvento(ev)})));
+
+  const topLucro  = [...todosEvs].sort((a,b)=>b.r.lucroTotal-a.r.lucroTotal).slice(0,5);
+  const topVendas = [...todosEvs].sort((a,b)=>b.r.totalVendas-a.r.totalVendas).slice(0,5);
+
+  const renderTop = (evs, campo) => evs.length
+    ? evs.map((ev,i)=>`
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);${i===evs.length-1?'border:none':''}">
+        <div style="font-size:11px;font-weight:600;color:var(--muted2);min-width:16px">${i+1}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.nome}</div>
+          <div style="font-size:11px;color:var(--muted)">${ev.pastaNome}</div>
+        </div>
+        <div class="mono" style="font-size:12px;color:${campo==='lucro'?'var(--accent)':'var(--text)'};flex-shrink:0">${brl(campo==='lucro'?ev.r.lucroTotal:ev.r.totalVendas)}</div>
+      </div>`).join('')
+    : '<p style="font-size:12px;color:var(--muted)">Sem eventos neste ano</p>';
+
+  document.getElementById('dash-top-lucro').innerHTML  = renderTop(topLucro,'lucro');
+  document.getElementById('dash-top-vendas').innerHTML = renderTop(topVendas,'vendas');
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────
