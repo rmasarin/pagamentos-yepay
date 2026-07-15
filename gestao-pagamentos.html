@@ -255,6 +255,22 @@ hr{border:none;border-top:1px solid var(--border);margin:1rem 0}
     </div>
     <div class="metrics" id="pasta-metrics"></div>
     <div id="repasse-status" style="display:none;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:1rem"></div>
+    <!-- Resumo de pagamentos -->
+    <div id="pasta-pagamentos-resumo" style="margin-bottom:1rem"></div>
+    <!-- Despesas da semana -->
+    <div class="card" style="margin-bottom:1rem" id="card-despesas">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <div class="st" style="margin:0">Despesas da semana</div>
+        <button class="btn btn-sm" onclick="addDespesa()">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="11" height="11"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Adicionar
+        </button>
+      </div>
+      <div id="lista-despesas"></div>
+      <div id="despesas-total" style="display:none;text-align:right;font-size:13px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)"></div>
+    </div>
+    <!-- Lucro real -->
+    <div id="lucro-real-card" style="display:none;margin-bottom:1rem"></div>
     <div class="card" id="lista-eventos-pasta"></div>
   </div>
 
@@ -391,6 +407,42 @@ hr{border:none;border-top:1px solid var(--border);margin:1rem 0}
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:1rem">
       <button class="btn" onclick="fecharModal()">Cancelar</button>
       <button class="btn btn-accent" onclick="criarPasta()">Criar pasta</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal despesa -->
+<div id="modal-despesa" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.7);align-items:center;justify-content:center;padding:1rem">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rlg);padding:1.5rem;width:100%;max-width:420px">
+    <div style="font-size:15px;font-weight:600;margin-bottom:1.25rem" id="modal-desp-title">Nova despesa</div>
+    <div class="fg">
+      <label>Descrição *</label>
+      <input type="text" id="desp-desc" placeholder="ex: Bobinas térmicas, Comissão João...">
+    </div>
+    <div class="grid2">
+      <div class="fg">
+        <label>Categoria</label>
+        <select id="desp-cat">
+          <option value="bobinas">Bobinas</option>
+          <option value="comissao">Comissão</option>
+          <option value="transporte">Transporte</option>
+          <option value="alimentacao">Alimentação</option>
+          <option value="manutencao">Manutenção</option>
+          <option value="outros">Outros</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label>Valor (R$) *</label>
+        <input type="number" id="desp-valor" min="0" step="0.01" placeholder="0,00">
+      </div>
+    </div>
+    <div class="fg">
+      <label>Observação</label>
+      <input type="text" id="desp-obs" placeholder="ex: 10 rolos comprados na papelaria">
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:1rem">
+      <button class="btn" onclick="fecharModalDespesa()">Cancelar</button>
+      <button class="btn btn-accent" onclick="salvarDespesa()">Salvar</button>
     </div>
   </div>
 </div>
@@ -536,15 +588,21 @@ function renderLista(){
   el.innerHTML=S.pastas.map(p=>{
     const t=calcPasta(p);
     const evCount=(p.eventos||[]).length;
+    const pendentes=(p.eventos||[]).filter(e=>!e.repasse||e.repasse.status!=='feito').length;
+    const despTotal=totalDespesas(p);
+    const lucroReal=t.lucro-despTotal;
     return `<div class="pasta-item" onclick="abrirPasta('${p.id}')">
-      <div>
-        <div style="font-size:14px;font-weight:500">${p.nome}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">${evCount} evento${evCount!==1?'s':''} · ${fmtDate(p.data)}</div>
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="font-size:14px;font-weight:500">${p.nome}</div>
+          ${pendentes===0&&evCount>0?`<span style="font-size:10px;padding:1px 7px;border-radius:20px;background:rgba(90,245,160,.1);color:var(--green)">✓ pago</span>`:`<span style="font-size:10px;padding:1px 7px;border-radius:20px;background:rgba(245,166,35,.1);color:var(--amber)">⏳ ${pendentes} pendente${pendentes>1?'s':''}</span>`}
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">${evCount} evento${evCount!==1?'s':''} · ${fmtDate(p.data)}${despTotal>0?` · despesas: ${brl(despTotal)}`:''}</div>
       </div>
       <div style="display:flex;align-items:center;gap:12px">
         <div style="text-align:right">
-          <div style="font-size:13px;font-weight:500;font-family:'DM Mono',monospace">${brl(t.lucro)}</div>
-          <div style="font-size:11px;color:var(--muted)">lucro</div>
+          <div style="font-size:13px;font-weight:500;font-family:'DM Mono',monospace;color:${lucroReal>=0?'var(--text)':'var(--red)'}">${brl(lucroReal)}</div>
+          <div style="font-size:11px;color:var(--muted)">lucro real</div>
         </div>
         ${mbadge(t.vendas>0?(t.lucro/t.vendas)*100:0)}
         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();excluirPasta('${p.id}')">
@@ -611,6 +669,8 @@ function renderPasta(){
     }
     return 0; // data = ordem de inserção
   });
+  renderDespesas();
+  renderResumoPagamentos();
   // Atualiza estilo dos botões de sort
   ['data','az','lucro','vendas','repasse','pendente'].forEach(k=>{
     const btn=document.getElementById('sort-ev-'+k);
@@ -1045,6 +1105,17 @@ function gerarPlanilha(){
     +tot.lucro.toFixed(2),'','','','']);
   const ws=XLSX.utils.aoa_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb,ws,'Fechamento');
+  // Aba despesas
+  if((p.despesas||[]).length>0){
+    const despRows=[['Despesas da semana — '+p.nome],['Categoria','Descrição','Valor (R$)','Observação']];
+    p.despesas.forEach(d=>despRows.push([CAT_NOMES[d.cat]||d.cat, d.desc, +d.valor.toFixed(2), d.obs||'']));
+    despRows.push([]);
+    const tdp=totalDespesas(p);
+    despRows.push(['','Total despesas',+tdp.toFixed(2),'']);
+    despRows.push(['','Lucro eventos',+tot.lucro.toFixed(2),'']);
+    despRows.push(['','Lucro real',+(tot.lucro-tdp).toFixed(2),'']);
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(despRows),'Despesas');
+  }
   // Aba com lista de arquivos
   const arqRows=[['Arquivos importados nesta pasta'],[]];
   p.eventos.forEach(ev=>arqRows.push([ev.nome, ev.arquivo||'']));
@@ -1728,6 +1799,179 @@ function verCliente(id){
 function voltarClientes(){
   document.getElementById('cli-view-detalhe').style.display='none';
   document.getElementById('cli-view-lista').style.display='block';
+}
+
+// ─── Despesas ────────────────────────────────────────────────────────
+const CAT_ICONS = {
+  bobinas:'🖨️', comissao:'💰', transporte:'🚗',
+  alimentacao:'🍽️', manutencao:'🔧', outros:'📦'
+};
+const CAT_NOMES = {
+  bobinas:'Bobinas', comissao:'Comissão', transporte:'Transporte',
+  alimentacao:'Alimentação', manutencao:'Manutenção', outros:'Outros'
+};
+
+let editandoDespesaId = null;
+
+function addDespesa(){
+  editandoDespesaId = null;
+  document.getElementById('modal-desp-title').textContent = 'Nova despesa';
+  document.getElementById('desp-desc').value = '';
+  document.getElementById('desp-cat').value = 'bobinas';
+  document.getElementById('desp-valor').value = '';
+  document.getElementById('desp-obs').value = '';
+  document.getElementById('modal-despesa').style.display = 'flex';
+}
+
+function editarDespesa(id){
+  const d = (S.pastaAtiva.despesas||[]).find(x=>x.id===id);
+  if(!d) return;
+  editandoDespesaId = id;
+  document.getElementById('modal-desp-title').textContent = 'Editar despesa';
+  document.getElementById('desp-desc').value = d.desc;
+  document.getElementById('desp-cat').value = d.cat;
+  document.getElementById('desp-valor').value = d.valor;
+  document.getElementById('desp-obs').value = d.obs||'';
+  document.getElementById('modal-despesa').style.display = 'flex';
+}
+
+function fecharModalDespesa(){
+  document.getElementById('modal-despesa').style.display = 'none';
+}
+
+function salvarDespesa(){
+  const desc = document.getElementById('desp-desc').value.trim();
+  const valor = +document.getElementById('desp-valor').value||0;
+  if(!desc){ toast('Informe a descrição','err'); return; }
+  if(!valor){ toast('Informe o valor','err'); return; }
+  const desp = {
+    id: editandoDespesaId||'d_'+Date.now(),
+    desc,
+    cat: document.getElementById('desp-cat').value,
+    valor,
+    obs: document.getElementById('desp-obs').value.trim()
+  };
+  if(!S.pastaAtiva.despesas) S.pastaAtiva.despesas = [];
+  if(editandoDespesaId){
+    S.pastaAtiva.despesas = S.pastaAtiva.despesas.map(d=>d.id===editandoDespesaId?desp:d);
+  } else {
+    S.pastaAtiva.despesas.push(desp);
+  }
+  const idx = S.pastas.findIndex(p=>p.id===S.pastaAtiva.id);
+  if(idx>=0) S.pastas[idx] = S.pastaAtiva;
+  save();
+  if(S.driveConnected) sincronizarDrive();
+  fecharModalDespesa();
+  renderDespesas();
+  toast(editandoDespesaId?'Despesa atualizada!':'Despesa adicionada!');
+}
+
+function excluirDespesa(id){
+  if(!confirm('Excluir esta despesa?')) return;
+  S.pastaAtiva.despesas = (S.pastaAtiva.despesas||[]).filter(d=>d.id!==id);
+  const idx = S.pastas.findIndex(p=>p.id===S.pastaAtiva.id);
+  if(idx>=0) S.pastas[idx] = S.pastaAtiva;
+  save();
+  if(S.driveConnected) sincronizarDrive();
+  renderDespesas();
+  toast('Despesa excluída');
+}
+
+function totalDespesas(pasta){
+  return (pasta.despesas||[]).reduce((a,d)=>a+d.valor,0);
+}
+
+function renderDespesas(){
+  const despesas = S.pastaAtiva.despesas||[];
+  const el = document.getElementById('lista-despesas');
+  const totalEl = document.getElementById('despesas-total');
+  const lucroEl = document.getElementById('lucro-real-card');
+
+  if(!despesas.length){
+    el.innerHTML = '<p style="font-size:12px;color:var(--muted)">Nenhuma despesa registrada. Clique em "Adicionar" para incluir.</p>';
+    totalEl.style.display = 'none';
+    lucroEl.style.display = 'none';
+    return;
+  }
+
+  // Agrupa por categoria
+  const porCat = {};
+  despesas.forEach(d=>{
+    if(!porCat[d.cat]) porCat[d.cat] = [];
+    porCat[d.cat].push(d);
+  });
+
+  el.innerHTML = Object.entries(porCat).map(([cat, itens])=>`
+    <div style="margin-bottom:10px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">
+        ${CAT_ICONS[cat]||'📦'} ${CAT_NOMES[cat]||cat}
+      </div>
+      ${itens.map(d=>`
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg3);border-radius:var(--r);margin-bottom:4px">
+          <div style="flex:1">
+            <div style="font-size:13px">${d.desc}</div>
+            ${d.obs?`<div style="font-size:11px;color:var(--muted)">${d.obs}</div>`:''}
+          </div>
+          <div class="mono" style="font-size:13px;color:var(--red);flex-shrink:0">- ${brl(d.valor)}</div>
+          <button class="btn btn-sm" onclick="editarDespesa('${d.id}')" style="padding:4px 8px">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="excluirDespesa('${d.id}')" style="padding:4px 8px">✕</button>
+        </div>`).join('')}
+    </div>`).join('');
+
+  const total = totalDespesas(S.pastaAtiva);
+  totalEl.style.display = 'block';
+  totalEl.innerHTML = `<span style="color:var(--muted)">Total despesas:</span> <strong style="color:var(--red);font-family:'DM Mono',monospace">- ${brl(total)}</strong>`;
+
+  // Lucro real
+  const t = calcPasta(S.pastaAtiva);
+  const lucroReal = t.lucro - total;
+  lucroEl.style.display = 'block';
+  lucroEl.innerHTML = `
+    <div style="background:${lucroReal>=0?'rgba(200,245,90,.05)':'rgba(255,107,107,.05)'};border:1px solid ${lucroReal>=0?'rgba(200,245,90,.2)':'rgba(255,107,107,.2)'};border-radius:var(--rlg);padding:1rem 1.25rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div>
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Lucro real da semana</div>
+          <div style="font-size:22px;font-weight:600;font-family:'DM Mono',monospace;color:${lucroReal>=0?'var(--accent)':'var(--red)'}">${brl(lucroReal)}</div>
+        </div>
+        <div style="display:flex;gap:16px;font-size:13px">
+          <div style="text-align:right">
+            <div style="color:var(--muted);font-size:11px">Lucro eventos</div>
+            <div class="mono" style="color:var(--accent)">+ ${brl(t.lucro)}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="color:var(--muted);font-size:11px">Total despesas</div>
+            <div class="mono" style="color:var(--red)">- ${brl(total)}</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderResumoPagamentos(){
+  const el = document.getElementById('pasta-pagamentos-resumo');
+  if(!el) return;
+  const evs = S.pastaAtiva.eventos||[];
+  if(!evs.length){ el.innerHTML=''; return; }
+  const total = evs.length;
+  const feitos = evs.filter(e=>e.repasse&&e.repasse.status==='feito').length;
+  const pendentes = total - feitos;
+  const tudo_ok = pendentes === 0;
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--r);background:${tudo_ok?'rgba(90,245,160,.05)':'rgba(245,166,35,.05)'};border:1px solid ${tudo_ok?'rgba(90,245,160,.2)':'rgba(245,166,35,.2)'}">
+      <div style="font-size:18px">${tudo_ok?'✅':'⏳'}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500;color:${tudo_ok?'var(--green)':'var(--amber)'}">
+          ${tudo_ok?'Todos os repasses realizados!':pendentes+' repasse'+(pendentes>1?'s pendentes':' pendente')}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">
+          ${feitos} de ${total} evento${total>1?'s':''} transferido${feitos>1?'s':''}
+        </div>
+      </div>
+      ${!tudo_ok?`<div style="text-align:right">
+        <div style="font-size:11px;color:var(--muted)">A transferir ainda</div>
+        <div class="mono" style="font-size:13px;font-weight:600;color:var(--amber)">${brl(evs.filter(e=>!e.repasse||e.repasse.status!=='feito').reduce((a,ev)=>a+calcEvento(ev).repasseLiquido,0))}</div>
+      </div>`:''}
+    </div>`;
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────
