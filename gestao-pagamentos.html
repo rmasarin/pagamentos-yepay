@@ -817,7 +817,9 @@ function criarPasta(){
 function excluirPasta(id){
   if(!confirm('Excluir esta pasta e todos os eventos?'))return;
   S.pastas=S.pastas.filter(p=>p.id!==id);
-  save();renderLista();toast('Pasta excluída');
+  save();
+  if(S.driveConnected) sincronizarDrive();
+  renderLista();toast('Pasta excluída');
 }
 function baixarRelatorio(id){
   const ev = S.pastaAtiva.eventos.find(e=>e.id===id);
@@ -838,7 +840,9 @@ function excluirEvento(id){
   S.pastaAtiva.eventos=S.pastaAtiva.eventos.filter(e=>e.id!==id);
   const idx=S.pastas.findIndex(p=>p.id===S.pastaAtiva.id);
   if(idx>=0) S.pastas[idx]=S.pastaAtiva;
-  save();renderPasta();toast('Evento excluído');
+  save();
+  if(S.driveConnected) sincronizarDrive();
+  renderPasta();toast('Evento excluído');
 }
 
 // ─── Import ───────────────────────────────────────────────────────────
@@ -1047,6 +1051,8 @@ function confirmarEvento(){
   const idx=S.pastas.findIndex(p=>p.id===S.pastaAtiva.id);
   if(idx>=0) S.pastas[idx]=S.pastaAtiva;
   save();
+  // Sincroniza dados independente do upload do arquivo
+  if(S.driveConnected) sincronizarDrive();
   // Upload do arquivo original para o Drive
   if(S.driveConnected&&d.fileData&&ev.arquivo){
     const folderId=S.pastaAtiva.driveFolderId;
@@ -1058,7 +1064,6 @@ function confirmarEvento(){
         driveUploadOriginal(d.fileData, ev.arquivo, fid);
       });
     }
-    sincronizarDrive();
   }
   S.importData=null; S.maqTemp=[]; S.editandoEvento=null;
   voltarPasta();
@@ -1530,7 +1535,9 @@ function salvarCliente(){
 function excluirCliente(id){
   if(!confirm('Excluir este cliente?')) return;
   S.clientes=S.clientes.filter(c=>c.id!==id);
-  save(); renderClientes();
+  save();
+  if(S.driveConnected) sincronizarDrive();
+  renderClientes();
   toast('Cliente excluído');
 }
 
