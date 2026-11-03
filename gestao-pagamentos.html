@@ -650,6 +650,10 @@ function renderPasta(){
     statusEl.style.display='none';
     statusEl.innerHTML='';
   }
+  // despesas e resumo precisam ser renderizados mesmo sem eventos,
+  // senão os dados da pasta anterior continuam na tela
+  renderDespesas();
+  renderResumoPagamentos();
   // eventos
   const el=document.getElementById('lista-eventos-pasta');
   if(!(p.eventos||[]).length){
@@ -669,8 +673,6 @@ function renderPasta(){
     }
     return 0; // data = ordem de inserção
   });
-  renderDespesas();
-  renderResumoPagamentos();
   // Atualiza estilo dos botões de sort
   ['data','az','lucro','vendas','repasse','pendente'].forEach(k=>{
     const btn=document.getElementById('sort-ev-'+k);
